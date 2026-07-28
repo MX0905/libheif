@@ -58,7 +58,7 @@ jobs:
             -DCMAKE_ANDROID_ARCH_ABI=arm64-v8a `
             -DCMAKE_ANDROID_NDK=$env:NDK_ROOT `
             -DCMAKE_BUILD_TYPE=Release `
-            -DCMAKE_PREFIX_PATH=/data/local/arm64 `
+            -DCMAKE_PREFIX_PATH=arm64-prefix `
             -DBUILD_SHARED_LIBS=OFF `
             -DCMAKE_EXE_LINKER_FLAGS="-static -static-libgcc -static-libstdc++" `
             -DENABLE_PLUGINS=OFF `
