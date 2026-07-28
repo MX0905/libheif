@@ -201,40 +201,121 @@ cd -
 # ================= 18. libheif 本体 =================
 echo "===== libheif ====="
 clone https://github.com/strukturag/libheif.git libheif
-rm -rf "$SRC_DIR/libheif/build-android"; mkdir -p "$SRC_DIR/libheif/build-android"; cd "$SRC_DIR/libheif/build-android"
+rm -rf "$SRC_DIR/libheif/build-android"
+mkdir -p "$SRC_DIR/libheif/build-android" && cd "$SRC_DIR/libheif/build-android"
+
+# libde265 的 cmake 模块会找 liblibde265.a，做个副本兼容
+cp "$PREFIX/lib/libde265.a" "$PREFIX/lib/liblibde265.a" 2>/dev/null || true
+
+# ----- 写 pkg-config .pc 文件（用正确库名，不带 lib 前缀重复）-----
+PC_DIR="$PREFIX/lib/pkgconfig"
+mkdir -p "$PC_DIR"
+
+write_pc() {
+  local pcname="$1" libs="$2"
+  cat > "$PC_DIR/${pcname}.pc" << EOF
+prefix=$PREFIX
+exec_prefix=\${prefix}
+libdir=\${prefix}/lib
+includedir=\${prefix}/include
+
+Name: ${pcname}
+Description: ${pcname}
+Version: 1.0
+Cflags: -I\${includedir}
+Libs: -L\${libdir} ${libs}
+EOF
+}
+
+# .pc 文件名和 Libs 里的名字必须匹配库的实际文件名
+write_pc zlib      "-lz"
+write_pc libjpeg   "-ljpeg"
+write_pc libpng    "-lpng16"
+write_pc libwebp   "-lwebp"
+write_pc brotlienc "-lbrotlienc -lbrotlidec -lbrotlicommon"
+write_pc liblzma   "-llzma"
+write_pc zstd      "-lzstd"
+write_pc libde265  "-lde265"
+write_pc x265      "-lx265"
+write_pc aom       "-laom"
+write_pc vvenc     "-lvvenc"
+write_pc vvdec     "-lvvdec"
+write_pc openjp2   "-lopenjp2"
+write_pc openjph   "-lopenjph"
+
+# ----- 可靠的 pkg-config shim -----
+cat > "$PREFIX/bin/pkg-config" << 'SH'
+#!/bin/sh
+PC_DIR="$PREFIX_PLACEHOLDER/lib/pkgconfig"
+action=""
+package=""
+for arg in "$@"; do
+  case "$arg" in
+    --cflags|--libs|--exists|--modversion) action="$arg" ;;
+    -*) ;;
+    *)  [ -z "$package" ] && package="$arg" ;;
+  esac
+done
+[ ! -f "$PC_DIR/$package.pc" ] && exit 1
+case "$action" in
+  --cflags)     grep '^Cflags:' "$PC_DIR/$package.pc" | sed 's/^Cflags: *//' ;;
+  --libs)       grep '^Libs:'   "$PC_DIR/$package.pc" | sed 's/^Libs: *//' ;;
+  --modversion) grep '^Version:' "$PC_DIR/$package.pc" | sed 's/^Version: *//' ;;
+  --exists)     exit 0 ;;
+  *)            cat "$PC_DIR/$package.pc" ;;
+esac
+SH
+# 替换占位符为实际路径
+sed -i "s|PREFIX_PLACEHOLDER|$PREFIX|g" "$PREFIX/bin/pkg-config"
+chmod +x "$PREFIX/bin/pkg-config"
+
+export PATH="$PREFIX/bin:$PATH"
+export PKG_CONFIG_PATH="$PC_DIR"
 
 cmake .. -G "Unix Makefiles" \
   -DCMAKE_TOOLCHAIN_FILE="$CMAKE_TOOLCHAIN" \
   -DANDROID_ABI="$ABI" -DANDROID_PLATFORM="$API" \
   -DCMAKE_INSTALL_PREFIX="$PREFIX" \
+  -DCMAKE_PREFIX_PATH="$PREFIX" \
+  -DPKG_CONFIG_EXECUTABLE="$PREFIX/bin/pkg-config" \
   -DBUILD_SHARED_LIBS=OFF \
-  -DBUILD_TESTING=OFF -DBUILD_EXAMPLES=OFF -DBUILD_TOOLS=ON \
-  -DLIBHEIF_STATIC_DEFINE=ON \
-  -DWITH_X265=ON -DX265_INCLUDE_DIR="$PREFIX/include" -DX265_LIBRARY="$PREFIX/lib/libx265.a" \
-  -DWITH_AOM_ENCODER=ON -DWITH_AOM_DECODER=ON -DAOM_INCLUDE_DIR="$PREFIX/include" -DAOM_LIBRARY="$PREFIX/lib/libaom.a" \
-  -DWITH_LIBDE265=ON -DLIBDE265_INCLUDE_DIR="$PREFIX/include" -DLIBDE265_LIBRARY="$PREFIX/lib/liblibde265.a" \
-  -DWITH_VVENC=ON -DVVENC_INCLUDE_DIR="$PREFIX/include" -DVVENC_LIBRARY="$PREFIX/lib/libvvenc.a" \
-  -DWITH_VVDEC=ON -DVVDEC_INCLUDE_DIR="$PREFIX/include" -DVVDEC_LIBRARY="$PREFIX/lib/libvvdec.a" \
-  -DWITH_OPENJPEG=ON -DOPENJPEG_INCLUDE_DIR="$PREFIX/include" -DOPENJPEG_LIBRARY="$PREFIX/lib/libopenjp2.a" \
-  -DWITH_OPENJPH=ON -DOPENJPH_INCLUDE_DIR="$PREFIX/include" -DOPENJPH_LIBRARY="$PREFIX/lib/libopenjph.a" \
-  -DWITH_LIBJPEG=ON -DJPEG_INCLUDE_DIR="$PREFIX/include" -DJPEG_LIBRARY="$PREFIX/lib/libjpeg.a" \
-  -DWITH_LIBPNG=ON -DPNG_INCLUDE_DIR="$PREFIX/include" -DPNG_LIBRARY="$PREFIX/lib/libpng16.a" \
-  -DWITH_LIBWEBP=ON -DWEBP_INCLUDE_DIR="$PREFIX/include" -DWEBP_LIBRARY="$PREFIX/lib/libwebp.a" \
-  -DWITH_BROTLI=ON -DBROTLI_INCLUDE_DIR="$PREFIX/include" \
-  -DBROTLI_LIBRARY="$PREFIX/lib/libbrotlienc.a;$PREFIX/lib/libbrotlidec.a;$PREFIX/lib/libbrotlicommon.a" \
-  -DWITH_ZLIB=ON -DZLIB_INCLUDE_DIR="$PREFIX/include" -DZLIB_LIBRARY="$PREFIX/lib/libz.a" \
-  -DWITH_LZMA=ON -DLZMA_INCLUDE_DIR="$PREFIX/include" -DLZMA_LIBRARY="$PREFIX/lib/liblzma.a" \
-  -DWITH_ZSTD=ON -DZSTD_INCLUDE_DIR="$PREFIX/include" -DZSTD_LIBRARY="$PREFIX/lib/libzstd.a"
+  -DBUILD_TESTING=OFF \
+  -DBUILD_EXAMPLES=ON \
+  -DBUILD_TOOLS=ON \
+  -DENABLE_PLUGIN_LOADING=OFF \
+  -DWITH_LIBDE265=ON \
+  -DWITH_X265=ON \
+  -DWITH_AOM_DECODER=ON \
+  -DWITH_AOM_ENCODER=ON \
+  -DWITH_VVDEC=ON \
+  -DWITH_VVENC=ON \
+  -DWITH_OPENJPEG_DECODER=ON \
+  -DWITH_OPENJPEG_ENCODER=ON \
+  -DWITH_OPENJPH_ENCODER=ON \
+  -DWITH_JPEG_DECODER=ON \
+  -DWITH_JPEG_ENCODER=ON \
+  -DWITH_LIBPNG=ON \
+  -DWITH_LIBWEBP=ON \
+  -DWITH_BROTLI=ON \
+  -DWITH_ZLIB=ON \
+  -DWITH_LZMA=ON \
+  -DWITH_ZSTD=ON \
+  -DWITH_UNCOMPRESSED_CODEC=ON \
+  -DWITH_DAV1D=OFF \
+  -DWITH_KVAZAAR=OFF \
+  -DWITH_RAV1E=OFF \
+  -DWITH_UVG266=OFF \
+  -DWITH_FFMPEG_DECODER=OFF
 
-make -j"$JOBS"
-
-# 把工具拷到 prefix/bin
-cp -v tools/heif-enc tools/heif-dec tools/heif-info "$PREFIX/bin/" 2>/dev/null || \
-cp -v bin/heif-enc bin/heif-dec bin/heif-info "$PREFIX/bin/" 2>/dev/null || true
+make -j"$JOBS" && make install
+cd -# 拷贝工具（两个位置都试）
+cp -v tools/heif-* "$PREFIX/bin/" 2>/dev/null
+cp -v examples/heif-* "$PREFIX/bin/" 2>/dev/null
+cp -v bin/heif-* "$PREFIX/bin/" 2>/dev/null
 
 cd -
 
 echo "===== DONE ====="
 echo "静态库: $PREFIX/lib"
-echo "单体工具: $PREFIX/bin (heif-enc / heif-dec / heif-info)"
-ls -la "$PREFIX/bin"
+echo "单体工具: $PREFIX/bin"
+ls -la "$PREFIX/bin/"
