@@ -1,11 +1,8 @@
 #!/bin/bash
 # build_deps_android_arm64.sh
-# 在 GitHub Actions Windows runner (MSYS2/bash) 下运行
-# 目标: Android arm64, API 24, NDK r27c, 全静态, 汇编/NEON 优化全开
-# 全部依赖从官方仓库拉取并编译到 /data/local/arm64
+# 目标: Android arm64, API 24, NDK r27c, 全静态, 汇编优化全开
 
 set -e
-set -o pipefail
 
 # ====== 基本配置 ======
 API=24
@@ -26,43 +23,34 @@ NM="$TOOLCHAIN/bin/llvm-nm"
 STRIP="$TOOLCHAIN/bin/llvm-strip"
 LD="$TOOLCHAIN/bin/ld.lld"
 
-# 公共编译 flags（静态、优化、NEON）
+# 公共 CFLAGS / LDFLAGS（静态、优化、NEON）
 export CFLAGS="--target=aarch64-linux-android$API --sysroot=$SYSROOT -O3 -fPIC -DANDROID -DNDEBUG"
-export CXXFLAGS="--target=aarch64-linux-android$API --sysroot=$SYSROOT -O3 -fPIC -DANDROID -DNDEBUG -fexceptions -frtti"
-export LDFLAGS="--target=aarch64-linux-android$API --sysroot=$SYSROOT -static -L$SYSROOT/usr/lib/$ABI -L$PREFIX/lib"
+export CXXFLAGS="--target=aarch64-linux-android$API --sysroot=$SYSROOT -O3 -fPIC -DANDROID -DNDEBUG"
+export LDFLAGS="--target=aarch64-linux-android$API --sysroot=$SYSROOT -static -L$SYSROOT/usr/lib/$ABI"
 export AR RANLIB NM STRIP LD
 
-# cmake 工具链文件（NDK 自带）
+# cmake 工具链文件（用 NDK 自带）
 CMAKE_TOOLCHAIN="$NDK_ROOT/build/cmake/android.toolchain.cmake"
 
-# 安装目录
+# 创建安装目录
 mkdir -p "$PREFIX"/{include,lib}
 
-# 源码目录
+# 源码统一放这里
 SRC_DIR="$(pwd)/deps-src"
 mkdir -p "$SRC_DIR"
 
-# ---------- 工具函数 ----------
+# 克隆助手：已存在则拉最新
 clone() {
   local repo="$1" dir="$2"
-  if [ -d "$SRC_DIR/$dir/.git" ]; then
-    git -C "$SRC_DIR/$dir" fetch --depth 1 origin || true
-    git -C "$SRC_DIR/$dir" reset --hard origin/HEAD 2>/dev/null || true
+  if [ -d "$SRC_DIR/$dir" ]; then
+    git -C "$SRC_DIR/$dir" pull --ff-only || true
   else
     git clone --depth 1 "$repo" "$SRC_DIR/$dir"
   fi
 }
 
-log() { echo -e "\n\033[1;34m===== $* =====\033[0m"; }
-
-# 确保 MSYS2 有 autotools（xz 用）
-if ! command -v autoreconf >/dev/null 2>&1; then
-  pacman -S --noconfirm autoconf automake libtool 2>/dev/null || true
-fi
-
-# ===================================================================
-log "1/16 zlib"
-# ===================================================================
+# ====== 1. zlib ======
+echo "===== Building zlib ====="
 clone "https://github.com/madler/zlib.git" zlib
 cd "$SRC_DIR/zlib"
 ./configure --prefix="$PREFIX" --static
@@ -70,9 +58,8 @@ make -j"$JOBS"
 make install
 cd -
 
-# ===================================================================
-log "2/16 libjpeg-turbo"
-# ===================================================================
+# ====== 2. libjpeg-turbo ======
+echo "===== Building libjpeg-turbo ====="
 clone "https://github.com/libjpeg-turbo/libjpeg-turbo.git" libjpeg-turbo
 rm -rf "$SRC_DIR/libjpeg-turbo/build"
 mkdir -p "$SRC_DIR/libjpeg-turbo/build" && cd "$SRC_DIR/libjpeg-turbo/build"
@@ -81,14 +68,12 @@ cmake .. -G "Unix Makefiles" \
   -DANDROID_ABI="$ABI" -DANDROID_PLATFORM="$API" \
   -DCMAKE_INSTALL_PREFIX="$PREFIX" \
   -DENABLE_SHARED=OFF -DENABLE_STATIC=ON \
-  -DWITH_SIMD=ON \
-  -DCMAKE_C_FLAGS="$CFLAGS" -DCMAKE_CXX_FLAGS="$CXXFLAGS"
+  -DWITH_SIMD=ON
 make -j"$JOBS" && make install
 cd -
 
-# ===================================================================
-log "3/16 libpng"
-# ===================================================================
+# ====== 3. libpng ======
+echo "===== Building libpng ====="
 clone "https://github.com/glennrp/libpng.git" libpng
 rm -rf "$SRC_DIR/libpng/build"
 mkdir -p "$SRC_DIR/libpng/build" && cd "$SRC_DIR/libpng/build"
@@ -99,14 +84,12 @@ cmake .. -G "Unix Makefiles" \
   -DBUILD_SHARED_LIBS=OFF \
   -DPNG_SHARED=OFF -DPNG_STATIC=ON \
   -DZLIB_INCLUDE_DIR="$PREFIX/include" \
-  -DZLIB_LIBRARY="$PREFIX/lib/libz.a" \
-  -DCMAKE_C_FLAGS="$CFLAGS" -DCMAKE_CXX_FLAGS="$CXXFLAGS"
+  -DZLIB_LIBRARY="$PREFIX/lib/libz.a"
 make -j"$JOBS" && make install
 cd -
 
-# ===================================================================
-log "4/16 libtiff"
-# ===================================================================
+# ====== 4. libtiff ======
+echo "===== Building libtiff ====="
 clone "https://gitlab.com/libtiff/libtiff.git" libtiff
 rm -rf "$SRC_DIR/libtiff/build"
 mkdir -p "$SRC_DIR/libtiff/build" && cd "$SRC_DIR/libtiff/build"
@@ -115,16 +98,14 @@ cmake .. -G "Unix Makefiles" \
   -DANDROID_ABI="$ABI" -DANDROID_PLATFORM="$API" \
   -DCMAKE_INSTALL_PREFIX="$PREFIX" \
   -DBUILD_SHARED_LIBS=OFF \
-  -Djpeg=ON -Djbig=OFF -Dlerc=OFF -Dzstd=OFF -Dwebp=OFF -Dlzma=OFF \
+  -Djpeg=ON -Djbig=OFF -Dlerc=OFF -Dzstd=OFF -Dwebp=OFF \
   -DZLIB_INCLUDE_DIR="$PREFIX/include" -DZLIB_LIBRARY="$PREFIX/lib/libz.a" \
-  -DJPEG_INCLUDE_DIR="$PREFIX/include" -DJPEG_LIBRARY="$PREFIX/lib/libjpeg.a" \
-  -DCMAKE_C_FLAGS="$CFLAGS" -DCMAKE_CXX_FLAGS="$CXXFLAGS"
+  -DJPEG_INCLUDE_DIR="$PREFIX/include" -DJPEG_LIBRARY="$PREFIX/lib/libjpeg.a"
 make -j"$JOBS" && make install
 cd -
 
-# ===================================================================
-log "5/16 libwebp"
-# ===================================================================
+# ====== 5. libwebp ======
+echo "===== Building libwebp ====="
 clone "https://chromium.googlesource.com/webm/libwebp" libwebp
 rm -rf "$SRC_DIR/libwebp/build"
 mkdir -p "$SRC_DIR/libwebp/build" && cd "$SRC_DIR/libwebp/build"
@@ -135,16 +116,15 @@ cmake .. -G "Unix Makefiles" \
   -DBUILD_SHARED_LIBS=OFF \
   -DWEBP_BUILD_ANIM_UTILS=OFF -DWEBP_BUILD_CWEBP=OFF -DWEBP_BUILD_DWEBP=OFF \
   -DWEBP_BUILD_GIF2WEBP=OFF -DWEBP_BUILD_IMG2WEBP=OFF \
-  -DWEBP_BUILD_VWEBP=OFF -DWEBP_BUILD_WEBPINFO=OFF \
-  -DWEBP_BUILD_WEBPMUX=OFF -DWEBP_BUILD_EXTRAS=OFF \
-  -DWEBP_ENABLE_SIMD=ON -DWEBP_USE_THREAD=ON \
-  -DCMAKE_C_FLAGS="$CFLAGS" -DCMAKE_CXX_FLAGS="$CXXFLAGS"
+  -DWEBP_BUILD_VWEBP=OFF -DWEBP_BUILD_WEBPINFO=OFF -DWEBP_BUILD_LIBWEBPMUX=OFF \
+  -DWEBP_BUILD_WEBPMUX=OFF \
+  -DWEBP_ENABLE_SIMD=ON \
+  -DWEBP_USE_THREAD=ON
 make -j"$JOBS" && make install
 cd -
 
-# ===================================================================
-log "6/16 brotli"
-# ===================================================================
+# ====== 6. brotli ======
+echo "===== Building brotli ====="
 clone "https://github.com/google/brotli.git" brotli
 rm -rf "$SRC_DIR/brotli/build"
 mkdir -p "$SRC_DIR/brotli/build" && cd "$SRC_DIR/brotli/build"
@@ -152,31 +132,26 @@ cmake .. -G "Unix Makefiles" \
   -DCMAKE_TOOLCHAIN_FILE="$CMAKE_TOOLCHAIN" \
   -DANDROID_ABI="$ABI" -DANDROID_PLATFORM="$API" \
   -DCMAKE_INSTALL_PREFIX="$PREFIX" \
-  -DBUILD_SHARED_LIBS=OFF \
-  -DCMAKE_C_FLAGS="$CFLAGS" -DCMAKE_CXX_FLAGS="$CXXFLAGS"
+  -DBUILD_SHARED_LIBS=OFF
 make -j"$JOBS" && make install
 cd -
 
-# ===================================================================
-log "7/16 xz (lzma)"
-# ===================================================================
+# ====== 7. xz (lzma) ======
+echo "===== Building xz (lzma) ====="
 clone "https://github.com/tukaani-project/xz.git" xz
-cd "$SRC_DIR/xz"
-[ -x ./autogen.sh ] && ./autogen.sh || autoreconf -i 2>/dev/null || true
-./configure \
-  --host=aarch64-linux-android \
-  --prefix="$PREFIX" \
-  --enable-static --disable-shared \
-  --disable-doc --disable-nls \
-  --disable-xz --disable-xzdec --disable-lzmadec --disable-lzmainfo \
-  CC="$CC" AR="$AR" RANLIB="$RANLIB" STRIP="$STRIP" \
-  CFLAGS="-O3 -fPIC"
+rm -rf "$SRC_DIR/xz/build"
+mkdir -p "$SRC_DIR/xz/build" && cd "$SRC_DIR/xz/build"
+cmake .. -G "Unix Makefiles" \
+  -DCMAKE_TOOLCHAIN_FILE="$CMAKE_TOOLCHAIN" \
+  -DANDROID_ABI="$ABI" -DANDROID_PLATFORM="$API" \
+  -DCMAKE_INSTALL_PREFIX="$PREFIX" \
+  -DBUILD_SHARED_LIBS=OFF \
+  -DBUILD_TESTING=OFF -DBUILD_DOCS=OFF
 make -j"$JOBS" && make install
 cd -
 
-# ===================================================================
-log "8/16 zstd"
-# ===================================================================
+# ====== 8. zstd ======
+echo "===== Building zstd ====="
 clone "https://github.com/facebook/zstd.git" zstd
 cd "$SRC_DIR/zstd"/lib
 make -j"$JOBS" \
@@ -184,12 +159,11 @@ make -j"$JOBS" \
   libzstd.a
 cp libzstd.a "$PREFIX/lib/"
 cp zstd.h "$PREFIX/include/"
-mkdir -p "$PREFIX/include/zstd" && cp zstd_errors.h "$PREFIX/include/zstd/" 2>/dev/null || true
+mkdir -p "$PREFIX/include/zstd" && cp common/zstd_internal.h "$PREFIX/include/zstd/" 2>/dev/null || true
 cd -
 
-# ===================================================================
-log "9/16 libde265"
-# ===================================================================
+# ====== 9. libde265 ======
+echo "===== Building libde265 ====="
 clone "https://github.com/strukturag/libde265.git" libde265
 rm -rf "$SRC_DIR/libde265/build"
 mkdir -p "$SRC_DIR/libde265/build" && cd "$SRC_DIR/libde265/build"
@@ -199,17 +173,13 @@ cmake .. -G "Unix Makefiles" \
   -DCMAKE_INSTALL_PREFIX="$PREFIX" \
   -DBUILD_SHARED_LIBS=OFF \
   -DENABLE_SDL=OFF -DENABLE_DECODER=ON -DENABLE_ENCODER=ON \
-  -DENABLE_ASSEMBLY=ON \
-  -DCMAKE_C_FLAGS="$CFLAGS" -DCMAKE_CXX_FLAGS="$CXXFLAGS"
+  -DENABLE_ASSEMBLY=ON -DENABLE_LOG_ERROR=ON -DENABLE_LOG_INFO=OFF
 make -j"$JOBS" && make install
 cd -
 
-# ===================================================================
-log "10/16 x265"
-# ===================================================================
+# ====== 10. x265 ======
+echo "===== Building x265 ====="
 clone "https://bitbucket.org/multicoreware/x265_git.git" x265
-
-# x265 自家 CMake, 写一份最小工具链
 cat > "$SRC_DIR/x265/build/arm64-android.cmake" <<EOF
 set(CMAKE_SYSTEM_NAME Android)
 set(CMAKE_SYSTEM_VERSION $API)
@@ -221,7 +191,6 @@ set(CMAKE_AR $AR)
 set(CMAKE_RANLIB $RANLIB)
 set(CMAKE_FIND_ROOT_PATH $PREFIX)
 EOF
-
 rm -rf "$SRC_DIR/x265/build/android"
 mkdir -p "$SRC_DIR/x265/build/android" && cd "$SRC_DIR/x265/build/android"
 cmake ../../source \
@@ -235,9 +204,8 @@ cmake ../../source \
 make -j"$JOBS" && make install
 cd -
 
-# ===================================================================
-log "11/16 x264"
-# ===================================================================
+# ====== 11. x264 ======
+echo "===== Building x264 ====="
 clone "https://code.videolan.org/videolan/x264.git" x264
 cd "$SRC_DIR/x264"
 ./configure \
@@ -252,9 +220,8 @@ cd "$SRC_DIR/x264"
 make -j"$JOBS" && make install
 cd -
 
-# ===================================================================
-log "12/16 openh264"
-# ===================================================================
+# ====== 12. openh264 ======
+echo "===== Building openh264 ====="
 clone "https://github.com/cisco/openh264.git" openh264
 cd "$SRC_DIR/openh264"
 make -j"$JOBS" \
@@ -266,9 +233,8 @@ make -j"$JOBS" \
   install-static
 cd -
 
-# ===================================================================
-log "13/16 aom (AV1)"
-# ===================================================================
+# ====== 13. aom (AV1) ======
+echo "===== Building aom ====="
 clone "https://aomedia.googlesource.com/aom" aom
 rm -rf "$SRC_DIR/aom/build"
 mkdir -p "$SRC_DIR/aom/build" && cd "$SRC_DIR/aom/build"
@@ -280,14 +246,12 @@ cmake .. -G "Unix Makefiles" \
   -DENABLE_EXAMPLES=0 -DENABLE_TESTS=0 -DENABLE_DOCS=0 -DENABLE_TOOLS=0 \
   -DENABLE_NASM=0 -DENABLE_NEON=1 \
   -DAOM_TARGET_CPU=arm64 \
-  -DCONFIG_AV1_ENCODER=1 -DCONFIG_AV1_DECODER=1 \
-  -DCMAKE_C_FLAGS="$CFLAGS" -DCMAKE_CXX_FLAGS="$CXXFLAGS"
+  -DCONFIG_AV1_ENCODER=1 -DCONFIG_AV1_DECODER=1
 make -j"$JOBS" && make install
 cd -
 
-# ===================================================================
-log "14/16 vvenc"
-# ===================================================================
+# ====== 14. vvenc ======
+echo "===== Building vvenc ====="
 clone "https://github.com/fraunhoferhhi/vvenc.git" vvenc
 rm -rf "$SRC_DIR/vvenc/build"
 mkdir -p "$SRC_DIR/vvenc/build" && cd "$SRC_DIR/vvenc/build"
@@ -296,14 +260,12 @@ cmake .. -G "Unix Makefiles" \
   -DANDROID_ABI="$ABI" -DANDROID_PLATFORM="$API" \
   -DCMAKE_INSTALL_PREFIX="$PREFIX" \
   -DBUILD_SHARED_LIBS=OFF \
-  -DVVENC_ENABLE_THIRDPARTY_LIBS=OFF -DBUILD_APPS=OFF \
-  -DCMAKE_C_FLAGS="$CFLAGS" -DCMAKE_CXX_FLAGS="$CXXFLAGS"
+  -DVVENC_ENABLE_THIRDPARTY_LIBS=OFF -DBUILD_APPS=OFF
 make -j"$JOBS" && make install
 cd -
 
-# ===================================================================
-log "15/16 vvdec"
-# ===================================================================
+# ====== 15. vvdec ======
+echo "===== Building vvdec ====="
 clone "https://github.com/fraunhoferhhi/vvdec.git" vvdec
 rm -rf "$SRC_DIR/vvdec/build"
 mkdir -p "$SRC_DIR/vvdec/build" && cd "$SRC_DIR/vvdec/build"
@@ -312,14 +274,12 @@ cmake .. -G "Unix Makefiles" \
   -DANDROID_ABI="$ABI" -DANDROID_PLATFORM="$API" \
   -DCMAKE_INSTALL_PREFIX="$PREFIX" \
   -DBUILD_SHARED_LIBS=OFF \
-  -DBUILD_APPS=OFF \
-  -DCMAKE_C_FLAGS="$CFLAGS" -DCMAKE_CXX_FLAGS="$CXXFLAGS"
+  -DBUILD_APPS=OFF
 make -j"$JOBS" && make install
 cd -
 
-# ===================================================================
-log "16/16 OpenJPEG + OpenJPH"
-# ===================================================================
+# ====== 16. OpenJPEG ======
+echo "===== Building OpenJPEG ====="
 clone "https://github.com/uclouvain/openjpeg.git" openjpeg
 rm -rf "$SRC_DIR/openjpeg/build"
 mkdir -p "$SRC_DIR/openjpeg/build" && cd "$SRC_DIR/openjpeg/build"
@@ -328,11 +288,12 @@ cmake .. -G "Unix Makefiles" \
   -DANDROID_ABI="$ABI" -DANDROID_PLATFORM="$API" \
   -DCMAKE_INSTALL_PREFIX="$PREFIX" \
   -DBUILD_SHARED_LIBS=OFF \
-  -DBUILD_CODEC=OFF -DBUILD_TESTING=OFF -DBUILD_DOC=OFF \
-  -DCMAKE_C_FLAGS="$CFLAGS" -DCMAKE_CXX_FLAGS="$CXXFLAGS"
+  -DBUILD_CODEC=OFF -DBUILD_TESTING=OFF -DBUILD_DOC=OFF
 make -j"$JOBS" && make install
 cd -
 
+# ====== 17. OpenJPH ======
+echo "===== Building OpenJPH ====="
 clone "https://github.com/aous72/OpenJPH.git" openjph
 rm -rf "$SRC_DIR/openjph/build"
 mkdir -p "$SRC_DIR/openjph/build" && cd "$SRC_DIR/openjph/build"
@@ -341,14 +302,9 @@ cmake .. -G "Unix Makefiles" \
   -DANDROID_ABI="$ABI" -DANDROID_PLATFORM="$API" \
   -DCMAKE_INSTALL_PREFIX="$PREFIX" \
   -DBUILD_SHARED_LIBS=OFF \
-  -DOJPH_BUILD_EXECUTABLES=OFF \
-  -DCMAKE_C_FLAGS="$CFLAGS" -DCMAKE_CXX_FLAGS="$CXXFLAGS"
+  -DOJPH_BUILD_EXECUTABLES=OFF -DOJPH_DISABLE_INTEL_SIMD=OFF
 make -j"$JOBS" && make install
 cd -
 
-# ====== 完成 ======
-log "ALL 16 DEPS INSTALLED TO $PREFIX"
-echo "--- $PREFIX/lib ---"
-ls -la "$PREFIX/lib" | head -60
-echo "--- $PREFIX/include ---"
-ls "$PREFIX/include"
+echo "===== ALL DEPS INSTALLED TO $PREFIX ====="
+ls -la "$PREFIX/lib"
