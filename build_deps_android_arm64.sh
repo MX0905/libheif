@@ -189,29 +189,17 @@ make -j"$JOBS" && make install
 cd -
 
 # ====== 10. x265 ======
+# ====== x265 ======
 echo "===== Building x265 ====="
 clone "https://bitbucket.org/multicoreware/x265_git.git" x265
-cat > "$SRC_DIR/x265/build/arm64-android.cmake" <<EOF
-set(CMAKE_SYSTEM_NAME Android)
-set(CMAKE_SYSTEM_VERSION $API)
-set(ANDROID_ABI $ABI)
-set(ANDROID_PLATFORM $API)
-set(CMAKE_C_COMPILER $CC)
-set(CMAKE_CXX_COMPILER $CXX)
-set(CMAKE_AR $AR)
-set(CMAKE_RANLIB $RANLIB)
-set(CMAKE_FIND_ROOT_PATH $PREFIX)
-EOF
-rm -rf "$SRC_DIR/x265/build/android"
-mkdir -p "$SRC_DIR/x265/build/android" && cd "$SRC_DIR/x265/build/android"
-cmake ../../source \
+rm -rf "$SRC_DIR/x265/build-arm64"
+mkdir -p "$SRC_DIR/x265/build-arm64" && cd "$SRC_DIR/x265/build-arm64"
+cmake "$SRC_DIR/x265/source" \
   -G "Unix Makefiles" \
-  -DCMAKE_TOOLCHAIN_FILE="$SRC_DIR/x265/build/arm64-android.cmake" \
+  -DCMAKE_TOOLCHAIN_FILE="$CMAKE_TOOLCHAIN" \
+  -DANDROID_ABI="$ABI" -DANDROID_PLATFORM="$API" \
   -DCMAKE_INSTALL_PREFIX="$PREFIX" \
-  -DENABLE_SHARED=OFF -DENABLE_STATIC=ON \
-  -DENABLE_CLI=OFF -DENABLE_TESTS=OFF \
-  -DENABLE_ASSEMBLY=ON -DENABLE_NEON=ON \
-  -DCMAKE_C_FLAGS="-fPIC -O3" -DCMAKE_CXX_FLAGS="-fPIC -O3"
+  -DENABLE_SHARED=OFF -DENABLE_CLI=OFF -DENABLE_TESTS=OFF
 make -j"$JOBS" && make install
 cd -
 
