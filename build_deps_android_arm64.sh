@@ -52,18 +52,15 @@ clone() {
 # ====== 1. zlib ======
 echo "===== Building zlib ====="
 clone "https://github.com/madler/zlib.git" zlib
-cd "$SRC_DIR/zlib"
-# zlib 的 configure 不支持交叉编译检测，直接用 Makefile 指定 CC/CFLAGS 编译
-make -j"$JOBS" \
-  CC="$CC" \
-  AR="$AR" \
-  RANLIB="$RANLIB" \
-  CFLAGS="$CFLAGS" \
-  libz.a
-# 手动安装
-cp libz.a "$PREFIX/lib/"
-cp zlib.h "$PREFIX/include/"
-cp zconf.h "$PREFIX/include/"
+rm -rf "$SRC_DIR/zlib/build"
+mkdir -p "$SRC_DIR/zlib/build" && cd "$SRC_DIR/zlib/build"
+cmake .. -G "Unix Makefiles" \
+  -DCMAKE_TOOLCHAIN_FILE="$CMAKE_TOOLCHAIN" \
+  -DANDROID_ABI="$ABI" -DANDROID_PLATFORM="$API" \
+  -DCMAKE_INSTALL_PREFIX="$PREFIX" \
+  -DBUILD_SHARED_LIBS=OFF \
+  -DZLIB_BUILD_TESTING=OFF
+make -j"$JOBS" && make install
 cd -
 
 # ====== 2. libjpeg-turbo ======
