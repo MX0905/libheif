@@ -4,206 +4,96 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: "Git ref to build (branch / tag / commit)"
+        description: "Git ref to checkout (branch/tag/commit)"
         required: false
-        default: "main"
-      tag:
-        description: "Release tag label for artifact naming"
-        required: false
-        default: "full"
-
-# 全局环境变量
-env:
-  API: "24"
-  ABI: "arm64-v8a"
-  PREFIX: "/data/local/arm64"
-  NDK_VERSION: "r27c"
+        default: "master"
 
 jobs:
-  set-date:
-    runs-on: ubuntu-latest
-    outputs:
-      date: ${{ steps.date.outputs.date }}
-      tag: ${{ github.event.inputs.tag || 'full' }}
-    steps:
-      - id: date
-        run: echo "date=$(date -u +'%Y%m%d')" >> "$GITHUB_OUTPUT"
-
   build-android-bionic-arm64-libheif:
     runs-on: windows-latest
-    needs: set-date
-    permissions:
-      contents: read
     steps:
-      # ---------------------------------------------------------------
-      # 0. 检出源码
-      # ---------------------------------------------------------------
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.ref || 'main' }}
-          fetch-depth: 1
+          ref: ${{ github.event.inputs.ref }}
 
-      # ---------------------------------------------------------------
-      # 1. 下载并配置 Android NDK r27c
-      # ---------------------------------------------------------------
+      # 1. 下载配置 Android NDK r27c
       - name: Setup Android NDK
         shell: pwsh
         run: |
-          Write-Host "Downloading NDK ${{ env.NDK_VERSION }} ..."
-          Invoke-WebRequest `
-            "https://dl.google.com/android/repository/android-ndk-${{ env.NDK_VERSION }}-windows.zip" `
-            -OutFile ndk.zip
-          Expand-Archive ndk.zip -DestinationPath ./ndk
-          $ndkPath = "$(Get-Location)/ndk/android-ndk-${{ env.NDK_VERSION }}"
-          echo "NDK_ROOT=$ndkPath" >> $env:GITHUB_ENV
-          $clangBin = "$ndkPath/toolchains/llvm/prebuilt/windows-x86_64/bin"
-          echo "$clangBin" >> $env:GITHUB_PATH
-          # 也给 bash 脚本用
-          echo "NDK_ROOT=$ndkPath" >> $env:GITHUB_OUTPUT
+          Invoke-WebRequest "https://dl.google.com/android/repository/android-ndk-r27c-windows.zip" -OutFile ndk.zip
+          Expand-Archive ndk.zip ./ndk
+          $env:NDK_ROOT = "$(Get-Location)/ndk/android-ndk-r27c"
+          echo "NDK_ROOT=$env:NDK_ROOT" >> $env:GITHUB_ENV
+          $clangPath = "$env:NDK_ROOT/toolchains/llvm/prebuilt/windows-x86_64/bin"
+          echo "$clangPath" >> $env:GITHUB_PATH
 
-      # ---------------------------------------------------------------
-      # 2. 安装编译工具
-      # ---------------------------------------------------------------
-      - name: Install build tools (cmake, ninja, autotools)
-        run: |
-          choco install cmake ninja --yes
-          # MSYS2 自带 autoconf/automake/libtool 一般够用；没有就装
-          pacman -S --noconfirm autoconf automake libtool 2>/dev/null || true
+      # 2. 安装 cmake（ninja 已预装，不再重复）
+      - name: Install build tools
+        run: choco install cmake --yes
 
-      # ---------------------------------------------------------------
-      # 3. 缓存依赖源码 + 安装产物
-      # ---------------------------------------------------------------
+      # 3. 缓存依赖（第二次起秒过）
       - name: Cache deps
         uses: actions/cache@v4
         with:
           path: |
             deps-src
             /data/local/arm64
-          key: android-deps-v1-${{ hashFiles('build_deps_android_arm64.sh') }}
-          restore-keys: android-deps-v1-
+          key: android-deps-v2-${{ hashFiles('build_deps_android_arm64.sh') }}
+          restore-keys: android-deps-v2-
 
-      # ---------------------------------------------------------------
-      # 4. 批量静态编译所有依赖库（自动从官方仓库拉取）
-      #    脚本内判断：若 $PREFIX/lib 已有 libz.a 等则跳过
-      # ---------------------------------------------------------------
+      # 4. 批量静态编译所有依赖库
       - name: Build all static codec deps
-        shell: bash
-        run: |
-          # 若关键库已存在则跳过（缓存命中时）
-          if [ -f "$PREFIX/lib/libz.a" ] && \
-             [ -f "$PREFIX/lib/libjpeg.a" ] && \
-             [ -f "$PREFIX/lib/libaom.a" ] && \
-             [ -f "$PREFIX/lib/libx265.a" ] && \
-             [ -f "$PREFIX/lib/libvvenc.a" ]; then
-            echo "=== DEPS CACHE HIT, skip build ==="
-            ls -la "$PREFIX/lib" | head -30
-          else
-            echo "=== DEPS CACHE MISS, building ==="
-            bash ./build_deps_android_arm64.sh
-          fi
+        run: bash ./build_deps_android_arm64.sh
         env:
           NDK_ROOT: ${{ env.NDK_ROOT }}
 
-      # ---------------------------------------------------------------
-      # 5. CMake 编译 libheif + 全内置工具（静态链接全部 codec）
-      # ---------------------------------------------------------------
+      # 5. CMake 编译 libheif + 全内置工具
       - name: Build libheif static tools
-        shell: bash
         run: |
-          mkdir -p build-android
+          mkdir build-android
           cd build-android
-          cmake .. -G Ninja \
-            -DCMAKE_SYSTEM_NAME=Android \
-            -DCMAKE_SYSTEM_VERSION=${{ env.API }} \
-            -DCMAKE_ANDROID_ARCH_ABI=${{ env.ABI }} \
-            -DCMAKE_ANDROID_NDK="$NDK_ROOT" \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_PREFIX_PATH="${{ env.PREFIX }}" \
-            -DBUILD_SHARED_LIBS=OFF \
-            -DCMAKE_EXE_LINKER_FLAGS="-static -static-libgcc -static-libstdc++" \
-            -DENABLE_PLUGINS=OFF \
-            -DENABLE_MULTITHREADING_SUPPORT=ON \
-            -DBUILD_TESTING=OFF \
-            -DWITH_EXAMPLES=ON \
-            -DWITH_X265=ON \
-            -DWITH_AOM_ENCODER=ON \
-            -DWITH_AOM_DECODER=ON \
-            -DWITH_X264=ON \
-            -DWITH_VVENC=ON \
-            -DWITH_VVDEC=ON \
-            -DWITH_OPENJPEG=ON \
-            -DWITH_OPENJPH=ON \
-            -DWITH_LIBJPEG=ON \
-            -DWITH_LIBDE265=ON \
-            -DWITH_OPENH264=ON \
-            -DWITH_LIBPNG=ON \
-            -DWITH_ZLIB=ON \
-            -DWITH_LIBTIFF=ON \
-            -DWITH_LIBWEBP=ON \
-            -DWITH_BROTLI=ON \
-            -DWITH_DEFLATE=ON \
-            -DWITH_LZMA=ON \
-            -DWITH_ZSTD=ON
-          ninja -j"$(nproc)"
-          echo "=== build-android/tools ==="
-          ls -la tools/
+          cmake .. -G Ninja `
+            -DCMAKE_SYSTEM_NAME=Android `
+            -DCMAKE_SYSTEM_VERSION=24 `
+            -DCMAKE_ANDROID_ARCH_ABI=arm64-v8a `
+            -DCMAKE_ANDROID_NDK=$env:NDK_ROOT `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_PREFIX_PATH=/data/local/arm64 `
+            -DBUILD_SHARED_LIBS=OFF `
+            -DCMAKE_EXE_LINKER_FLAGS="-static -static-libgcc -static-libstdc++" `
+            -DENABLE_PLUGINS=OFF `
+            -DWITH_X265=ON -DWITH_AOM_ENCODER=ON -DWITH_X264=ON -DWITH_VVENC=ON `
+            -DWITH_OPENJPEG=ON -DWITH_OPENJPH=ON -DWITH_LIBJPEG=ON `
+            -DWITH_LIBDE265=ON -DWITH_AOM_DECODER=ON -DWITH_VVDEC=ON -DWITH_OPENH264=ON `
+            -DWITH_LIBPNG=ON -DWITH_ZLIB=ON -DWITH_LIBTIFF=ON -DWITH_LIBWEBP=ON `
+            -DWITH_BROTLI=ON -DWITH_DEFLATE=ON -DWITH_LZMA=ON -DWITH_ZSTD=ON
+          ninja -j4
 
-      # ---------------------------------------------------------------
-      # 6. Strip 符号表（大幅减小体积）
-      # ---------------------------------------------------------------
+      # 6. Strip 去符号
       - name: Strip binaries
-        shell: bash
         run: |
-          STRIP="$NDK_ROOT/toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-strip"
-          for bin in build-android/tools/heif-enc \
-                     build-android/tools/heif-dec \
-                     build-android/tools/heif-view; do
-            if [ -f "$bin" ]; then
-              echo "Stripping $bin ..."
-              "$STRIP" --strip-all "$bin"
-              ls -lh "$bin"
-            fi
-          done
+          $strip = "$env:NDK_ROOT/toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-strip"
+          & $strip --strip-all build-android/tools/heif-enc.exe
+          & $strip --strip-all build-android/tools/heif-dec.exe
+          & $strip --strip-all build-android/tools/heif-view.exe
 
-      # ---------------------------------------------------------------
-      # 7. 收集产物并校验（file 类型 + 基本运行测试）
-      # ---------------------------------------------------------------
-      - name: Collect & verify binaries
-        shell: bash
+      # 7. 提取输出二进制
+      - name: Collect binaries
         run: |
-          mkdir -p artifact-android-arm64
+          mkdir artifact-android-arm64
           cp build-android/tools/heif-enc artifact-android-arm64/
           cp build-android/tools/heif-dec artifact-android-arm64/
           cp build-android/tools/heif-view artifact-android-arm64/
-          cd artifact-android-arm64
-          echo "=== file types ==="
-          file heif-enc heif-dec heif-view
-          echo "=== sizes ==="
-          ls -lh heif-enc heif-dec heif-view
-          # 校验: 至少能打印帮助（在 Windows 上跑不了 arm64 ELF，仅检查存在+类型）
-          echo "=== verify non-empty ==="
-          for f in heif-enc heif-dec heif-view; do
-            [ -s "$f" ] && echo "$f OK ($(stat -c%s "$f") bytes)" || { echo "$f MISSING/EMPTY"; exit 1; }
-          done
 
-      # ---------------------------------------------------------------
-      # 8. 打包 tar.gz（Termux / Linux 标准）
-      # ---------------------------------------------------------------
+      # 8. 打包 tar.gz
       - name: Package android-bionic-arm64 tarball
-        shell: bash
         run: |
           cd artifact-android-arm64
-          tar -czvf "../libheif-full_${{ needs.set-date.outputs.tag }}_android-bionic-arm64_${{ needs.set-date.outputs.date }}.tar.gz" \
-            heif-enc heif-dec heif-view
-          cd ..
-          ls -lh libheif-full_*.tar.gz
+          tar -czvf ../libheif-full_android-bionic-arm64.tar.gz heif-enc heif-dec heif-view
 
-      # ---------------------------------------------------------------
       # 9. 上传制品
-      # ---------------------------------------------------------------
       - name: Upload Android artifact
         uses: actions/upload-artifact@v4
         with:
           name: libheif-android-bionic-arm64
           path: libheif-full_*.tar.gz
-          retention-days: 90
