@@ -6,7 +6,7 @@ on:
       ref:
         description: "Git ref to checkout (branch/tag/commit)"
         required: false
-        default: "master"
+        default: "main"
 
 jobs:
   build-android-bionic-arm64-libheif:
