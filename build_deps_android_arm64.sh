@@ -207,27 +207,6 @@ cmake "$SRC_DIR/x265/source" \
 make -j"$JOBS" && make install
 cd -
 
-# ====== 11. x264 ======
-# ====== x264 ======
-echo "===== Building x264 ====="
-clone "https://code.videolan.org/videolan/x264.git" x264
-cd "$SRC_DIR/x264"
-make distclean 2>/dev/null || true
-
-CC="$NDK/toolchains/llvm/prebuilt/windows-x86_64/bin/aarch64-linux-android24-clang" \
-AR="$NDK/toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-ar" \
-STRIP="$NDK/toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-strip" \
-./configure \
-  --host=aarch64-linux-android \
-  --disable-cli \
-  --enable-static \
-  --enable-pic \
-  --prefix="$PREFIX" \
-  --sysroot="$NDK/toolchains/llvm/prebuilt/windows-x86_64/sysroot"
-
-make -j"$JOBS"
-make install
-cd -
 
 # ====== 12. openh264 ======
 echo "===== Building openh264 ====="
