@@ -7,7 +7,7 @@ set -e
 # ====== 基本配置 ======
 API=24
 ABI=arm64-v8a
-PREFIX=/data/local/arm64
+PREFIX="$(pwd)/arm64-prefix"
 JOBS=$(nproc)
 
 NDK_ROOT="${NDK_ROOT:-/d/a/_temp/ndk/android-ndk-r27c}"
@@ -96,16 +96,22 @@ cd -
 # ====== 4. libtiff ======
 echo "===== Building libtiff ====="
 clone "https://gitlab.com/libtiff/libtiff.git" libtiff
-rm -rf "$SRC_DIR/libtiff/build"
-mkdir -p "$SRC_DIR/libtiff/build" && cd "$SRC_DIR/libtiff/build"
-cmake .. -G "Unix Makefiles" \
+rm -rf "$SRC_DIR/libtiff-build"
+mkdir -p "$SRC_DIR/libtiff-build" && cd "$SRC_DIR/libtiff-build"
+cmake "$SRC_DIR/libtiff" \
+  -G "Unix Makefiles" \
   -DCMAKE_TOOLCHAIN_FILE="$CMAKE_TOOLCHAIN" \
   -DANDROID_ABI="$ABI" -DANDROID_PLATFORM="$API" \
   -DCMAKE_INSTALL_PREFIX="$PREFIX" \
   -DBUILD_SHARED_LIBS=OFF \
   -Djpeg=ON -Djbig=OFF -Dlerc=OFF -Dzstd=OFF -Dwebp=OFF \
-  -DZLIB_INCLUDE_DIR="$PREFIX/include" -DZLIB_LIBRARY="$PREFIX/lib/libz.a" \
-  -DJPEG_INCLUDE_DIR="$PREFIX/include" -DJPEG_LIBRARY="$PREFIX/lib/libjpeg.a"
+  -Dopengl=OFF -Dglut=OFF -DGLUT=OFF \
+  -DOpenGL=OFF -DGL=OFF -DGLUT=OFF \
+  -DBUILD_TESTING=OFF -DBUILD_DOCS=OFF -DBUILD_CONTRIB=OFF \
+  -DZLIB_INCLUDE_DIR="$PREFIX/include" \
+  -DZLIB_LIBRARY="$PREFIX/lib/libz.a" \
+  -DJPEG_INCLUDE_DIR="$PREFIX/include" \
+  -DJPEG_LIBRARY="$PREFIX/lib/libjpeg.a"
 make -j"$JOBS" && make install
 cd -
 
