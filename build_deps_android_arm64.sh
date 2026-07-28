@@ -53,9 +53,17 @@ clone() {
 echo "===== Building zlib ====="
 clone "https://github.com/madler/zlib.git" zlib
 cd "$SRC_DIR/zlib"
-./configure --prefix="$PREFIX" --static
-make -j"$JOBS"
-make install
+# zlib 的 configure 不支持交叉编译检测，直接用 Makefile 指定 CC/CFLAGS 编译
+make -j"$JOBS" \
+  CC="$CC" \
+  AR="$AR" \
+  RANLIB="$RANLIB" \
+  CFLAGS="$CFLAGS" \
+  libz.a
+# 手动安装
+cp libz.a "$PREFIX/lib/"
+cp zlib.h "$PREFIX/include/"
+cp zconf.h "$PREFIX/include/"
 cd -
 
 # ====== 2. libjpeg-turbo ======
