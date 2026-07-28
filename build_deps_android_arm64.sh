@@ -208,19 +208,21 @@ make -j"$JOBS" && make install
 cd -
 
 # ====== 11. x264 ======
+# ====== x264 ======
 echo "===== Building x264 ====="
 clone "https://code.videolan.org/videolan/x264.git" x264
 cd "$SRC_DIR/x264"
+make distclean 2>/dev/null || true
 ./configure \
-  --prefix="$PREFIX" \
   --host=aarch64-linux-android \
-  --cross-prefix="$TOOLCHAIN/bin/llvm-" \
-  --sysroot="$SYSROOT" \
-  --enable-static --disable-shared \
-  --enable-pic --disable-cli \
-  --extra-cflags="-O3 -fPIC" \
-  --disable-asm
-make -j"$JOBS" && make install
+  --disable-cli \
+  --enable-static \
+  --disable-shared \
+  --prefix="$PREFIX" \
+  --cross-prefix="$NDK/toolchains/llvm/prebuilt/windows-x86_64/bin/aarch64-linux-android-" \
+  --sysroot="$NDK/toolchains/llvm/prebuilt/windows-x86_64/sysroot"
+make -j"$JOBS"
+make install
 cd -
 
 # ====== 12. openh264 ======
