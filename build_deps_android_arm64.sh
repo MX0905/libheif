@@ -209,24 +209,6 @@ make -j"$JOBS" && make install
 cd -
 
 
-# ======12. openh264 ======
-echo "===== Building openh264 ====="
-clone "https://github.com/cisco/openh264.git" openh264
-cd "$SRC_DIR/openh264"
-
-make clean 2>/dev/null || true
-
-make \
-  OS=android \
-  ARCH=arm64 \
-  NDKROOT="$NDK" \
-  TARGET=android \
-  PREFIX="$PREFIX" \
-  -j"$JOBS"
-
-make OS=android ARCH=arm64 NDKROOT="$NDK" PREFIX="$PREFIX" install
-cd -
-
 # ====== 13. aom (AV1) ======
 echo "===== Building aom ====="
 clone "https://aomedia.googlesource.com/aom" aom
